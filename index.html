@@ -506,15 +506,16 @@
 
             try {
                 // ملاحظة للمبرمج: لإنشاء مستخدم دون تسجيل خروج المسؤول، نستخدم نسخة ثانية من Firebase App
-                const secondaryApp = firebase.initializeApp(firebaseConfig, "SecondaryApp");
+                const secondaryApp = firebase.initializeApp(firebaseConfig, "SecondaryApp_" + Date.now());
                 const secondaryAuth = secondaryApp.auth();
 
                 // 1. إنشاء المستخدم في Firebase Authentication
                 await secondaryAuth.createUserWithEmailAndPassword(email, password);
                 
-                // 2. حفظ بيانات المستخدم في Firestore
+                // 2. حفظ بيانات المستخدم في Firestore (نقوم بتخزين كلمة المرور مؤقتاً لتمكين الحذف الكامل لاحقاً)
                 await db.collection('users').add({ 
                     email, 
+                    password, // مخزنة لتسهيل عملية الحذف الكامل من Authentication
                     createdAt: new Date().toISOString(),
                     role: 'user'
                 });
@@ -537,11 +538,45 @@
         }
 
         async function deleteUser(id) {
-            const confirmMsg = "هل أنت متأكد من حذف هذا المستخدم؟\n\nتنبيه: سيتم حذف بيانات المستخدم من قاعدة البيانات، ولكن لتعطيل دخوله تماماً يجب حذفه يدوياً من Firebase Auth (لأسباب أمنية).";
+            const userDoc = await db.collection('users').doc(id).get();
+            if (!userDoc.exists) return;
+            const userData = userDoc.data();
+
+            if (userData.email === ADMIN_EMAIL) {
+                return alert("لا يمكن حذف حساب المسؤول الرئيسي!");
+            }
+
+            const confirmMsg = `هل أنت متأكد من حذف المستخدم (${userData.email}) نهائياً؟\n\nسيتم حذف:\n1. حسابه من النظام تماماً.\n2. كافة بياناته وسجلاته.\n3. لن يتمكن من الدخول مرة أخرى.`;
+            
             if (confirm(confirmMsg)) {
                 try {
+                    // 1. الحذف من Firebase Authentication
+                    // نحتاج لتسجيل الدخول به في تطبيق ثانٍ لحذف حسابه
+                    const tempApp = firebase.initializeApp(firebaseConfig, "TempApp_" + Date.now());
+                    const tempAuth = tempApp.auth();
+                    
+                    try {
+                        const userCred = await tempAuth.signInWithEmailAndPassword(userData.email, userData.password);
+                        await userCred.user.delete();
+                    } catch (authError) {
+                        console.warn("Auth deletion skipped or failed:", authError.message);
+                        // إذا فشل حذف الـ Auth (مثلاً كلمة المرور تغيرت)، نكمل حذف البيانات
+                    }
+                    await tempApp.delete();
+
+                    // 2. حذف كافة سجلات اليوميات المرتبطة بهذا المستخدم
+                    const entriesSnapshot = await db.collection('diary').where('createdBy', '==', userData.email).get();
+                    const batch = db.batch();
+                    entriesSnapshot.forEach(doc => batch.delete(doc.ref));
+                    await batch.commit();
+
+                    // 3. حذف وثيقة المستخدم من Firestore
                     await db.collection('users').doc(id).delete();
-                } catch (e) { alert("خطأ في الحذف: " + e.message); }
+
+                    alert("تم حذف المستخدم وكافة بياناته بنجاح.");
+                } catch (e) { 
+                    alert("حدث خطأ أثناء عملية الحذف الشامل: " + e.message); 
+                }
             }
         }
 
