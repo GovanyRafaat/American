@@ -190,9 +190,15 @@
                         <input type="text" id="entry-to" class="w-full p-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="الوجهة">
                     </div>
                 </div>
-                <div>
-                    <label class="block text-sm font-semibold text-gray-600 mb-1">الوقت</label>
-                    <input type="time" id="entry-time" class="w-full p-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-600 mb-1">التاريخ</label>
+                        <input type="date" id="entry-date" class="w-full p-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-600 mb-1">الوقت</label>
+                        <input type="time" id="entry-time" class="w-full p-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    </div>
                 </div>
                 <div>
                     <label class="block text-sm font-semibold text-gray-600 mb-1">ملاحظات (اختياري)</label>
@@ -201,6 +207,28 @@
                 <div class="flex gap-4 pt-4">
                     <button onclick="saveEntry()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all">حفظ السجل</button>
                     <button onclick="toggleModal('entry-modal')" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold py-3 rounded-xl transition-all">إلغاء</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- مودال منح صلاحية التعديل -->
+    <div id="permission-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl p-8 transform transition-all">
+            <h3 class="text-2xl font-bold mb-6 text-gray-800 border-b pb-4">منح صلاحية تعديل مؤقتة</h3>
+            <div class="space-y-4">
+                <input type="hidden" id="perm-entry-id">
+                <div>
+                    <label class="block text-sm font-semibold text-gray-600 mb-1">البريد الإلكتروني للموظف</label>
+                    <input type="email" id="perm-user-email" class="w-full p-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="example@mail.com">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-gray-600 mb-1">صالح حتى (تاريخ ووقت)</label>
+                    <input type="datetime-local" id="perm-deadline" class="w-full p-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                </div>
+                <div class="flex gap-4 pt-4">
+                    <button onclick="savePermission()" class="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-bold py-3 rounded-xl shadow-lg transition-all">منح الصلاحية</button>
+                    <button onclick="toggleModal('permission-modal')" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold py-3 rounded-xl transition-all">إلغاء</button>
                 </div>
             </div>
         </div>
@@ -237,9 +265,11 @@
         const auth = firebase.auth();
         const db = firebase.firestore();
 
-        // بيانات المسؤول المحددة
-        const ADMIN_EMAIL = "govanyrafaat64@gmail.com";
-        const ADMIN_PASSWORD = "gogoo2009";
+        // قائمة المسؤولين المحددة
+        const ADMINS = [
+            { email: "govanyrafaat64@gmail.com", password: "gogoo2009" },
+            { email: "denaashraf35@gmail.com", password: "dododo@2026" }
+        ];
 
         let currentUser = null;
         let diaryUnsubscribe = null;
@@ -282,9 +312,11 @@
 
             if (!email || !password) return alert("يرجى إدخال البريد الإلكتروني وكلمة المرور");
 
+            const adminAccount = ADMINS.find(a => a.email === email && a.password === password);
+
             try {
                 // إذا كان المسؤول يحاول الدخول
-                if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+                if (adminAccount) {
                     try {
                         await auth.signInWithEmailAndPassword(email, password);
                     } catch (e) {
@@ -367,39 +399,61 @@
                         <div class="h-px bg-gray-200 flex-1"></div>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        ${grouped[day].map(entry => `
-                            <div class="bg-white p-6 rounded-2xl shadow-sm hover:shadow-xl transition-all border-t-4 border-blue-600 group relative">
-                                <div class="flex justify-between items-start mb-4">
-                                    <h4 class="text-xl font-bold text-gray-800">${entry.client}</h4>
-                                    <span class="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded-lg font-semibold">${entry.time}</span>
+                        ${grouped[day].map(entry => {
+                            const entryDate = new Date(entry.timestamp);
+                            const now = new Date();
+                            const oneWeekInMs = 7 * 24 * 60 * 60 * 1000;
+                            const isOld = (now - entryDate) > oneWeekInMs;
+                            const isCreator = entry.createdBy === currentUser.email;
+                            const isAllowedByAdmin = (entry.canEditUsers || []).includes(currentUser.email) && 
+                                                   entry.editDeadline && new Date(entry.editDeadline) > now;
+                            const canEdit = currentUser.isAdmin || (isCreator && !isOld) || isAllowedByAdmin;
+
+                            return `
+                                <div class="bg-white p-6 rounded-2xl shadow-sm hover:shadow-xl transition-all border-t-4 border-blue-600 group relative">
+                                    <div class="flex justify-between items-start mb-4">
+                                        <div>
+                                            <h4 class="text-xl font-bold text-gray-800">${entry.client}</h4>
+                                            <p class="text-[10px] text-gray-400 font-medium">بواسطة: ${entry.createdBy}</p>
+                                        </div>
+                                        <span class="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded-lg font-semibold">${entry.time}</span>
+                                    </div>
+                                    <div class="flex items-center gap-3 text-gray-600 mb-6 bg-gray-50 p-3 rounded-xl">
+                                        <div class="flex flex-col items-center">
+                                            <i class="fas fa-plane-departure text-blue-400 text-xs mb-1"></i>
+                                            <span class="font-bold text-gray-700">${entry.from}</span>
+                                        </div>
+                                        <div class="flex-1 flex items-center justify-center">
+                                            <div class="h-px bg-blue-200 flex-1"></div>
+                                            <i class="fas fa-chevron-left text-blue-300 mx-2"></i>
+                                            <div class="h-px bg-blue-200 flex-1"></div>
+                                        </div>
+                                        <div class="flex flex-col items-center">
+                                            <i class="fas fa-plane-arrival text-green-400 text-xs mb-1"></i>
+                                            <span class="font-bold text-gray-700">${entry.to}</span>
+                                        </div>
+                                    </div>
+                                    <button onclick="showNote('${entry.notes.replace(/'/g, "\\'")}')" class="w-full flex items-center justify-center gap-2 bg-gray-100 hover:bg-blue-600 text-gray-600 hover:text-white py-3 rounded-xl transition-all font-semibold">
+                                        <i class="fas fa-sticky-note"></i>
+                                        ملاحظات الرحلة
+                                    </button>
+                                    <div class="absolute top-2 left-2 flex gap-1 ${canEdit ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-all">
+                                        ${canEdit ? `
+                                            <button onclick="editEntry('${entry.id}')" class="bg-blue-100 text-blue-600 p-2 rounded-lg hover:bg-blue-600 hover:text-white"><i class="fas fa-edit text-xs"></i></button>
+                                        ` : ''}
+                                        ${currentUser.isAdmin ? `
+                                            <button onclick="grantPermissionModal('${entry.id}')" class="bg-amber-100 text-amber-600 p-2 rounded-lg hover:bg-amber-600 hover:text-white" title="منح صلاحية تعديل"><i class="fas fa-user-lock text-xs"></i></button>
+                                            <button onclick="deleteEntry('${entry.id}')" class="bg-red-100 text-red-600 p-2 rounded-lg hover:bg-red-600 hover:text-white"><i class="fas fa-trash text-xs"></i></button>
+                                        ` : ''}
+                                    </div>
+                                    ${isOld && !currentUser.isAdmin && !isAllowedByAdmin ? `
+                                        <div class="absolute inset-0 bg-white bg-opacity-10 backdrop-blur-[1px] rounded-2xl flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 transition-all">
+                                            <span class="bg-red-500 text-white px-4 py-1 rounded-full text-xs font-bold shadow-lg"><i class="fas fa-lock ml-1"></i> مغلق للتعديل</span>
+                                        </div>
+                                    ` : ''}
                                 </div>
-                                <div class="flex items-center gap-3 text-gray-600 mb-6 bg-gray-50 p-3 rounded-xl">
-                                    <div class="flex flex-col items-center">
-                                        <i class="fas fa-plane-departure text-blue-400 text-xs mb-1"></i>
-                                        <span class="font-bold text-gray-700">${entry.from}</span>
-                                    </div>
-                                    <div class="flex-1 flex items-center justify-center">
-                                        <div class="h-px bg-blue-200 flex-1"></div>
-                                        <i class="fas fa-chevron-left text-blue-300 mx-2"></i>
-                                        <div class="h-px bg-blue-200 flex-1"></div>
-                                    </div>
-                                    <div class="flex flex-col items-center">
-                                        <i class="fas fa-plane-arrival text-green-400 text-xs mb-1"></i>
-                                        <span class="font-bold text-gray-700">${entry.to}</span>
-                                    </div>
-                                </div>
-                                <button onclick="showNote('${entry.notes.replace(/'/g, "\\'")}')" class="w-full flex items-center justify-center gap-2 bg-gray-100 hover:bg-blue-600 text-gray-600 hover:text-white py-3 rounded-xl transition-all font-semibold">
-                                    <i class="fas fa-sticky-note"></i>
-                                    ملاحظات الرحلة
-                                </button>
-                                ${currentUser.isAdmin ? `
-                                    <div class="absolute top-2 left-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                                        <button onclick="editEntry('${entry.id}')" class="bg-blue-100 text-blue-600 p-2 rounded-lg hover:bg-blue-600 hover:text-white"><i class="fas fa-edit text-xs"></i></button>
-                                        <button onclick="deleteEntry('${entry.id}')" class="bg-red-100 text-red-600 p-2 rounded-lg hover:bg-red-600 hover:text-white"><i class="fas fa-trash text-xs"></i></button>
-                                    </div>
-                                ` : ''}
-                            </div>
-                        `).join('')}
+                            `;
+                        }).join('')}
                     </div>
                 `;
                 container.appendChild(section);
@@ -410,27 +464,22 @@
             const client = document.getElementById('entry-client').value;
             const from = document.getElementById('entry-from').value;
             const to = document.getElementById('entry-to').value;
+            const date = document.getElementById('entry-date').value;
             const time = document.getElementById('entry-time').value;
             const notes = document.getElementById('entry-notes').value;
 
-            if (!client || !from || !to || !time) return alert("يرجى ملء كافة الحقول الأساسية");
+            if (!client || !from || !to || !date || !time) return alert("يرجى ملء كافة الحقول الأساسية");
 
             try {
-                // الحصول على الوقت الفعلي من الإنترنت
-                let timestamp;
-                try {
-                    const res = await fetch('https://worldtimeapi.org/api/timezone/Etc/UTC');
-                    const data = await res.json();
-                    timestamp = data.datetime;
-                } catch (e) {
-                    timestamp = new Date().toISOString();
-                }
+                const entryDate = new Date(date + 'T' + time);
                 
                 await db.collection('diary').add({
                     client, from, to, time, notes,
-                    timestamp: timestamp,
+                    timestamp: entryDate.toISOString(),
                     createdBy: currentUser.email,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    canEditUsers: [], // قائمة المستخدمين المسموح لهم بالتعديل استثنائياً
+                    editDeadline: null // موعد انتهاء صلاحية التعديل الاستثنائية
                 });
 
                 toggleModal('entry-modal');
@@ -444,6 +493,30 @@
         function showNote(note) {
             document.getElementById('note-content').innerText = note || "لا توجد ملاحظات لهذه الرحلة";
             toggleModal('note-modal');
+        }
+
+        function grantPermissionModal(entryId) {
+            document.getElementById('perm-entry-id').value = entryId;
+            toggleModal('permission-modal');
+        }
+
+        async function savePermission() {
+            const entryId = document.getElementById('perm-entry-id').value;
+            const userEmail = document.getElementById('perm-user-email').value;
+            const deadline = document.getElementById('perm-deadline').value;
+
+            if (!userEmail || !deadline) return alert("يرجى إدخال البريد الإلكتروني والوقت");
+
+            try {
+                await db.collection('diary').doc(entryId).update({
+                    canEditUsers: firebase.firestore.FieldValue.arrayUnion(userEmail),
+                    editDeadline: new Date(deadline).toISOString()
+                });
+                alert("تم منح الصلاحية بنجاح");
+                toggleModal('permission-modal');
+            } catch (e) {
+                alert("خطأ في منح الصلاحية: " + e.message);
+            }
         }
 
         // --- منطق المسؤول (Real-time) ---
@@ -589,17 +662,25 @@
             document.getElementById('entry-client').value = data.client;
             document.getElementById('entry-from').value = data.from;
             document.getElementById('entry-to').value = data.to;
+            // استخراج التاريخ من الـ timestamp
+            const dateStr = data.timestamp.split('T')[0];
+            document.getElementById('entry-date').value = dateStr;
             document.getElementById('entry-time').value = data.time;
             document.getElementById('entry-notes').value = data.notes;
 
             const saveBtn = document.querySelector('#entry-modal button[onclick*="saveEntry"]');
             saveBtn.innerText = "تحديث بيانات الرحلة";
             saveBtn.onclick = async () => {
+                const updatedDate = document.getElementById('entry-date').value;
+                const updatedTime = document.getElementById('entry-time').value;
+                const updatedTimestamp = new Date(updatedDate + 'T' + updatedTime).toISOString();
+
                 const updatedData = {
                     client: document.getElementById('entry-client').value,
                     from: document.getElementById('entry-from').value,
                     to: document.getElementById('entry-to').value,
-                    time: document.getElementById('entry-time').value,
+                    time: updatedTime,
+                    timestamp: updatedTimestamp,
                     notes: document.getElementById('entry-notes').value
                 };
                 try {
@@ -626,7 +707,8 @@
         window.onload = () => {
             auth.onAuthStateChanged(user => {
                 if (user) {
-                    currentUser = { email: user.email, isAdmin: user.email === ADMIN_EMAIL };
+                    const isAdmin = ADMINS.some(a => a.email === user.email);
+                    currentUser = { email: user.email, isAdmin: isAdmin };
                     if (currentUser.isAdmin) {
                         document.getElementById('admin-btn').classList.remove('hidden');
                     } else {
