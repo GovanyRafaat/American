@@ -404,7 +404,7 @@
                             const now = new Date();
                             const oneWeekInMs = 7 * 24 * 60 * 60 * 1000;
                             const isOld = (now - entryDate) > oneWeekInMs;
-                            const isCreator = entry.createdBy === currentUser.email;
+                            const isCreator = entry.addedBy === currentUser.email;
                             const isAllowedByAdmin = (entry.canEditUsers || []).includes(currentUser.email) && 
                                                    entry.editDeadline && new Date(entry.editDeadline) > now;
                             const canEdit = currentUser.isAdmin || (isCreator && !isOld) || isAllowedByAdmin;
@@ -413,8 +413,8 @@
                                 <div class="bg-white p-6 rounded-2xl shadow-sm hover:shadow-xl transition-all border-t-4 border-blue-600 group relative">
                                     <div class="flex justify-between items-start mb-4">
                                         <div>
-                                            <h4 class="text-xl font-bold text-gray-800">${entry.client}</h4>
-                                            <p class="text-[10px] text-gray-400 font-medium">بواسطة: ${entry.createdBy}</p>
+                                            <h4 class="text-xl font-bold text-gray-800">${entry.clientName}</h4>
+                                            <p class="text-[10px] text-gray-400 font-medium">بواسطة: ${entry.addedBy}</p>
                                         </div>
                                         <span class="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded-lg font-semibold">${entry.time}</span>
                                     </div>
@@ -461,25 +461,28 @@
         }
 
         async function saveEntry() {
-            const client = document.getElementById('entry-client').value;
+            const clientName = document.getElementById('entry-client').value;
             const from = document.getElementById('entry-from').value;
             const to = document.getElementById('entry-to').value;
             const date = document.getElementById('entry-date').value;
             const time = document.getElementById('entry-time').value;
             const notes = document.getElementById('entry-notes').value;
 
-            if (!client || !from || !to || !date || !time) return alert("يرجى ملء كافة الحقول الأساسية");
+            if (!clientName || !from || !to || !date || !time) return alert("يرجى ملء كافة الحقول الأساسية");
 
             try {
                 const entryDate = new Date(date + 'T' + time);
+                if (isNaN(entryDate.getTime())) {
+                    throw new Error("تنسيق التاريخ أو الوقت غير صالح");
+                }
                 
                 await db.collection('diary').add({
-                    client, from, to, time, notes,
+                    clientName, from, to, date, time, notes,
                     timestamp: entryDate.toISOString(),
-                    createdBy: currentUser.email,
+                    addedBy: currentUser.email,
                     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                    canEditUsers: [], // قائمة المستخدمين المسموح لهم بالتعديل استثنائياً
-                    editDeadline: null // موعد انتهاء صلاحية التعديل الاستثنائية
+                    canEditUsers: [], 
+                    editDeadline: null 
                 });
 
                 toggleModal('entry-modal');
@@ -487,6 +490,7 @@
                 document.querySelectorAll('#entry-modal input, #entry-modal textarea').forEach(el => el.value = '');
             } catch (error) {
                 alert("خطأ في الحفظ: " + error.message);
+                console.error("Save Error:", error);
             }
         }
 
@@ -615,7 +619,8 @@
             if (!userDoc.exists) return;
             const userData = userDoc.data();
 
-            if (userData.email === ADMIN_EMAIL) {
+            const isAdminAccount = ADMINS.some(a => a.email === userData.email);
+            if (isAdminAccount) {
                 return alert("لا يمكن حذف حساب المسؤول الرئيسي!");
             }
 
@@ -659,7 +664,7 @@
             if (!doc.exists) return;
             const data = doc.data();
 
-            document.getElementById('entry-client').value = data.client;
+            document.getElementById('entry-client').value = data.clientName;
             document.getElementById('entry-from').value = data.from;
             document.getElementById('entry-to').value = data.to;
             // استخراج التاريخ من الـ timestamp
@@ -676,9 +681,10 @@
                 const updatedTimestamp = new Date(updatedDate + 'T' + updatedTime).toISOString();
 
                 const updatedData = {
-                    client: document.getElementById('entry-client').value,
+                    clientName: document.getElementById('entry-client').value,
                     from: document.getElementById('entry-from').value,
                     to: document.getElementById('entry-to').value,
+                    date: updatedDate,
                     time: updatedTime,
                     timestamp: updatedTimestamp,
                     notes: document.getElementById('entry-notes').value
